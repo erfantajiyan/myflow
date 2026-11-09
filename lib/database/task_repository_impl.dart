@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../core/date_time/date_only.dart';
 import '../shared/enums/app_enums.dart';
 import 'app_database.dart';
+import 'row_id.dart';
 
 /// خطاهای لایه‌ی وظیفه.
 sealed class TaskRepositoryException implements Exception {
@@ -125,6 +126,16 @@ abstract class TaskRepository {
 
   /// همه‌ی وظایف یک پروژه (برای محاسبه‌ی پیشرفت).
   Future<List<Task>> getTasksForProject(String projectId);
+
+  /// وظایف بایگانی‌نشده‌ای که تاریخ سررسیدشان بین [fromDay] و [toDay]
+  /// (شامل هر دو سر) است، مرتب بر اساس تاریخ و ساعت.
+  ///
+  /// وظایف بدون تاریخ سررسید در این بازه نمی‌گنجند؛ تقویم فقط کارهای
+  /// تاریخ‌دار را نشان می‌دهد (بخش ۱۰.۵: تاریخ بدون ساعت، timestamp نیست).
+  Future<List<Task>> getTasksDueBetween({
+    required DateTime fromDay,
+    required DateTime toDay,
+  });
 
   Future<Task> insertTask({
     String? id,
@@ -301,6 +312,26 @@ class DriftTaskRepository implements TaskRepository {
           ))
         .get();
     return rows.map(_fromRow).toList();
+  }
+
+  @override
+  Future<List<Task>> getTasksDueBetween({
+    required DateTime fromDay,
+    required DateTime toDay,
+  }) async {
+    final String fromText = formatDateOnly(fromDay);
+    final String toText = formatDateOnly(toDay);
+
+    final List<TaskRow> rows = await (_db.select(_db.tasks)
+          ..where(
+            (t) =>
+                t.archivedAt.isNull() &
+                t.dueDate.isBetweenValues(fromText, toText),
+          ))
+        .get();
+    final List<Task> tasks = rows.map(_fromRow).toList();
+    tasks.sort(_compareTasks);
+    return tasks;
   }
 
   @override
@@ -518,6 +549,5 @@ class DriftTaskRepository implements TaskRepository {
     return a.sortOrder.compareTo(b.sortOrder);
   }
 
-  String _newId() =>
-      'task-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+  String _newId() => newRowId('task');
 }

@@ -115,10 +115,19 @@ class EventEditorSheet extends ConsumerStatefulWidget {
     super.key,
     required this.initialDate,
     this.existing,
+    this.initialStartMinutes,
+    this.initialEndMinutes,
   });
 
   final DateTime initialDate;
   final Event? existing;
+
+  /// ساعت اولیه‌ی شروع به دقیقه‌ی روز؛ تایم‌لاین با لمس فضای خالی آن را
+  /// می‌دهد تا کاربر از همان ساعت شروع کند.
+  final int? initialStartMinutes;
+
+  /// ساعت اولیه‌ی پایان؛ اگر داده نشود یک ساعت بعد از شروع است.
+  final int? initialEndMinutes;
 
   @override
   ConsumerState<EventEditorSheet> createState() => _EventEditorSheetState();
@@ -157,10 +166,10 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
 
     _allDay = existing?.allDay ?? false;
     final int startMinutes = existing == null || existing.allDay
-        ? (10 * 60)
+        ? (widget.initialStartMinutes ?? (10 * 60))
         : (existing.startLocal.hour * 60) + existing.startLocal.minute;
     int endMinutes = existing == null || existing.allDay
-        ? (11 * 60)
+        ? (widget.initialEndMinutes ?? startMinutes + 60)
         : (existing.endLocal.hour * 60) + existing.endLocal.minute;
     if (endMinutes <= startMinutes) {
       endMinutes = startMinutes + 60;

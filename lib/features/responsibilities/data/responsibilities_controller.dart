@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../database/database_providers.dart';
+import '../../../database/row_id.dart';
 import '../../../database/responsibility_repository_impl.dart';
 import 'responsibility_seed.dart';
 
@@ -141,8 +142,5 @@ class ResponsibilitiesController extends AsyncNotifier<List<Responsibility>> {
     );
   }
 
-  String _newId() {
-    final int stamp = DateTime.now().microsecondsSinceEpoch;
-    return 'resp-${stamp.toRadixString(36)}';
-  }
+  String _newId() => newRowId('resp');
 }

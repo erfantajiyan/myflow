@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/core_providers.dart';
+import '../../../core/providers/data_revision_provider.dart';
 import '../../../database/database_providers.dart';
 import '../../../database/event_repository_impl.dart';
 import '../../../shared/enums/app_enums.dart';
@@ -93,6 +94,7 @@ class DayEventsController extends AsyncNotifier<List<Event>> {
       status: status,
     );
     ref.read(selectedEventDayProvider.notifier).select(created.startLocal);
+    ref.read(dataRevisionProvider.notifier).bump();
     await refresh();
     return created;
   }
@@ -119,11 +121,13 @@ class DayEventsController extends AsyncNotifier<List<Event>> {
       allDay: allDay,
       status: status,
     );
+    ref.read(dataRevisionProvider.notifier).bump();
     await refresh();
   }
 
   Future<void> delete(String id) async {
     await _repository.deleteEvent(id);
+    ref.read(dataRevisionProvider.notifier).bump();
     await refresh();
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myflow/app/app.dart';
+import 'package:myflow/app/router.dart';
 import 'package:myflow/database/app_database.dart';
 import 'package:myflow/database/database_providers.dart';
 import 'package:myflow/features/events/presentation/event_editor_sheet.dart';
@@ -40,7 +41,11 @@ void main() {
 
     await tester.pumpWidget(buildApp());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('افزودن رویداد'));
+
+    // دکمه‌ی «افزودن رویداد» داشبورد حالا فرم را در همان صفحه باز می‌کند،
+    // پس این تست مستقیم به مسیر فهرست رویدادها می‌رود.
+    final BuildContext context = tester.element(find.byType(MyFlowApp));
+    ProviderScope.containerOf(context).read(appRouterProvider).go('/events');
     await tester.pumpAndSettle();
   }
 

@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../shared/enums/app_enums.dart';
 import 'app_database.dart';
+import 'row_id.dart';
 
 /// خطاهای لایه‌ی رویداد.
 ///
@@ -108,6 +109,16 @@ abstract class EventRepository {
   /// رویدادهایی که با این روز محلی هم‌پوشانی دارند، مرتب بر اساس شروع.
   Future<List<Event>> getEventsForDay(DateTime localDay);
 
+  /// رویدادهای حذف‌نشده‌ای که با بازه‌ی روزهای محلی [fromDay] تا [toDay]
+  /// (شامل هر دو سر) هم‌پوشانی دارند، مرتب بر اساس شروع.
+  ///
+  /// این کوئری شبکه‌ی ماه و نمای هفتگی را با **یک** رفت‌وبرگشت به دیتابیس
+  /// پر می‌کند؛ به‌ازای هر خانه کوئری جدا زده نمی‌شود.
+  Future<List<Event>> getEventsInRange({
+    required DateTime fromDay,
+    required DateTime toDay,
+  });
+
   /// یک رویداد حذف‌نشده.
   Future<Event?> getEventById(String id);
 
@@ -211,6 +222,29 @@ class DriftEventRepository implements EventRepository {
             (t) => t.startAtUtc.isSmallerThanValue(dayEndUtc),
           )
           ..where((t) => t.endAtUtc.isBiggerThanValue(dayStartUtc))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.startAtUtc),
+            (t) => OrderingTerm.asc(t.title),
+          ]))
+        .get();
+    return rows.map(_fromRow).toList();
+  }
+
+  @override
+  Future<List<Event>> getEventsInRange({
+    required DateTime fromDay,
+    required DateTime toDay,
+  }) async {
+    final DateTime rangeStartUtc = _startOfDay(fromDay).toUtc();
+    final DateTime rangeEndUtc = _nextDayStart(toDay).toUtc();
+    if (!rangeEndUtc.isAfter(rangeStartUtc)) {
+      throw const EventValidationException('بازه‌ی تاریخ نامعتبر است.');
+    }
+
+    final rows = await (_db.select(_db.events)
+          ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.startAtUtc.isSmallerThanValue(rangeEndUtc))
+          ..where((t) => t.endAtUtc.isBiggerThanValue(rangeStartUtc))
           ..orderBy([
             (t) => OrderingTerm.asc(t.startAtUtc),
             (t) => OrderingTerm.asc(t.title),
@@ -411,8 +445,5 @@ class DriftEventRepository implements EventRepository {
     await (_db.delete(_db.events)..where((t) => t.id.equals(id))).go();
   }
 
-  String _newId() {
-    final int stamp = DateTime.now().microsecondsSinceEpoch;
-    return 'evt-${stamp.toRadixString(36)}';
-  }
+  String _newId() => newRowId('evt');
 }

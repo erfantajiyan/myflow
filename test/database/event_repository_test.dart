@@ -313,4 +313,93 @@ void main() {
       );
     });
   });
+
+  group('کوئری بازه‌ای تقویم', () {
+    test('رویدادهای داخل بازه با ترتیب شروع برمی‌گردند', () async {
+      await create(
+        title: 'دوم',
+        start: DateTime(2026, 3, 23, 9, 0),
+        end: DateTime(2026, 3, 23, 10, 0),
+      );
+      await create(
+        title: 'اول',
+        start: DateTime(2026, 3, 21, 9, 0),
+        end: DateTime(2026, 3, 21, 10, 0),
+      );
+      await create(
+        title: 'بیرون از بازه',
+        start: DateTime(2026, 3, 26, 9, 0),
+        end: DateTime(2026, 3, 26, 10, 0),
+      );
+
+      final List<Event> range = await events.getEventsInRange(
+        fromDay: DateTime(2026, 3, 20),
+        toDay: DateTime(2026, 3, 24),
+      );
+
+      expect(
+        range.map((Event event) => event.title),
+        <String>['اول', 'دوم'],
+      );
+    });
+
+    test('رویداد عبوری از نیمه‌شب در هر دو روز دیده می‌شود', () async {
+      await create(
+        title: 'شبانه',
+        start: DateTime(2026, 3, 21, 23, 0),
+        end: DateTime(2026, 3, 22, 0, 30),
+      );
+
+      expect(
+        (await events.getEventsForDay(DateTime(2026, 3, 21))).single.title,
+        'شبانه',
+      );
+      expect(
+        (await events.getEventsForDay(DateTime(2026, 3, 22))).single.title,
+        'شبانه',
+      );
+
+      // در کوئری بازه هم فقط یک ردیف برمی‌گردد، نه دو بار برای دو روز.
+      final List<Event> range = await events.getEventsInRange(
+        fromDay: DateTime(2026, 3, 21),
+        toDay: DateTime(2026, 3, 22),
+      );
+      expect(range, hasLength(1));
+    });
+
+    test('رویداد تمام‌روز یک روز کامل را می‌پوشاند', () async {
+      await create(title: 'تعطیل', allDay: true);
+
+      final List<Event> range = await events.getEventsInRange(
+        fromDay: DateTime(2026, 3, 21),
+        toDay: DateTime(2026, 3, 21),
+      );
+
+      expect(range.single.allDay, isTrue);
+      expect(range.single.startLocal, DateTime(2026, 3, 21));
+      expect(range.single.endLocal, DateTime(2026, 3, 22));
+    });
+
+    test('رویداد حذف‌شده در بازه نمی‌آید', () async {
+      final Event event = await create();
+      await events.deleteEvent(event.id);
+
+      final List<Event> range = await events.getEventsInRange(
+        fromDay: DateTime(2026, 3, 20),
+        toDay: DateTime(2026, 3, 24),
+      );
+
+      expect(range, isEmpty);
+    });
+
+    test('بازه‌ی معکوس رد می‌شود', () {
+      expect(
+        () => events.getEventsInRange(
+          fromDay: DateTime(2026, 3, 25),
+          toDay: DateTime(2026, 3, 24),
+        ),
+        throwsA(isA<EventValidationException>()),
+      );
+    });
+  });
 }

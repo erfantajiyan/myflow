@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/date_time/date_only.dart';
 import '../features/calendar/presentation/calendar_page.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/events/presentation/event_details_page.dart';
@@ -99,8 +100,9 @@ GoRouter buildAppRouter() {
         path: '/timeline',
         name: 'timeline',
         parentNavigatorKey: rootNavigatorKey,
-        builder: (BuildContext context, GoRouterState state) =>
-            const TimelinePage(),
+        builder: (BuildContext context, GoRouterState state) => TimelinePage(
+          initialDate: parseDateOnly(state.uri.queryParameters['date']),
+        ),
       ),
       GoRoute(
         path: '/responsibilities',

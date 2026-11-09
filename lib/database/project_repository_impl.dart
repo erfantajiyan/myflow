@@ -4,6 +4,7 @@ import 'package:flutter/painting.dart';
 import '../core/date_time/date_only.dart';
 import '../shared/enums/app_enums.dart';
 import 'app_database.dart';
+import 'row_id.dart';
 import 'responsibility_repository_impl.dart'
     show hexToColor, ResponsibilityRepositoryException;
 
@@ -491,6 +492,5 @@ class DriftProjectRepository implements ProjectRepository {
     await (_db.delete(_db.projects)..where((t) => t.id.equals(id))).go();
   }
 
-  String _newId() =>
-      'prj-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+  String _newId() => newRowId('prj');
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/data_revision_provider.dart';
 import '../../../database/database_providers.dart';
 import '../../../database/event_repository_impl.dart';
 import '../../../database/task_repository_impl.dart';
@@ -41,6 +42,8 @@ class TasksController extends AsyncNotifier<List<Task>> {
   }
 
   Future<void> refresh() async {
+    // هر بازخوانی یعنی داده تغییر کرده؛ صفحه‌های دیگر هم باید تازه شوند.
+    ref.read(dataRevisionProvider.notifier).bump();
     state = const AsyncValue<List<Task>>.loading();
     state = await AsyncValue.guard(
       () => ref

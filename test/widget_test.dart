@@ -7,6 +7,8 @@ import 'package:myflow/app/theme/app_colors.dart';
 import 'package:myflow/core/providers/core_providers.dart';
 import 'package:myflow/database/app_database.dart';
 import 'package:myflow/database/database_providers.dart';
+import 'package:myflow/features/calendar/presentation/calendar_page.dart';
+import 'package:myflow/features/timeline/presentation/timeline_page.dart';
 
 void main() {
   // ۱ فروردین ۱۴۰۴ — جمعه
@@ -81,7 +83,7 @@ void main() {
 
     await tester.tap(navLabel('تقویم'));
     await tester.pumpAndSettle();
-    expect(find.text('شبکه‌ی ماه شمسی به‌زودی'), findsOneWidget);
+    expect(find.byKey(calendarMonthModeKey), findsOneWidget);
 
     await tester.tap(navLabel('پروژه‌ها'));
     await tester.pumpAndSettle();
@@ -134,7 +136,8 @@ void main() {
     await tester.tap(find.text('رویداد جدید'));
     await tester.pumpAndSettle();
 
-    expect(find.text('رویدادها'), findsOneWidget);
+    // افزودن سریع، فرم رویداد را همان‌جا باز می‌کند.
+    expect(find.text('ذخیره رویداد'), findsOneWidget);
   });
 
   testWidgets('تایم‌لاین از داشبورد باز می‌شود', (WidgetTester tester) async {
@@ -144,6 +147,6 @@ void main() {
     await tester.tap(find.text('تایم‌لاین'));
     await tester.pumpAndSettle();
 
-    expect(find.text('تایم‌لاین روز'), findsOneWidget);
+    expect(find.byKey(timelineAxisKey), findsOneWidget);
   });
 }

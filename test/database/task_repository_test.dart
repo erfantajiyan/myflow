@@ -291,4 +291,62 @@ void main() {
       expect(await repository.getTaskById(task.id), isNull);
     });
   });
+
+  group('کوئری بازه‌ای تاریخ سررسید', () {
+    test('فقط وظایف داخل بازه با ترتیب تاریخ و ساعت برمی‌گردند', () async {
+      await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'دوم',
+        dueDate: DateTime(2026, 11, 6),
+        dueTime: '08:00',
+      );
+      await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'اول-بعدازظهر',
+        dueDate: DateTime(2026, 11, 5),
+        dueTime: '15:00',
+      );
+      await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'اول-صبح',
+        dueDate: DateTime(2026, 11, 5),
+        dueTime: '09:00',
+      );
+      await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'بیرون از بازه',
+        dueDate: DateTime(2026, 11, 9),
+      );
+
+      final List<Task> range = await repository.getTasksDueBetween(
+        fromDay: DateTime(2026, 11, 5),
+        toDay: DateTime(2026, 11, 7),
+      );
+
+      expect(
+        titlesOf(range),
+        <String>['اول-صبح', 'اول-بعدازظهر', 'دوم'],
+      );
+    });
+
+    test('وظیفه‌ی بدون تاریخ و بایگانی‌شده در بازه نمی‌آید', () async {
+      await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'بدون تاریخ',
+      );
+      final Task archived = await repository.insertTask(
+        responsibilityId: 'resp-1',
+        title: 'بایگانی‌شده',
+        dueDate: DateTime(2026, 11, 5),
+      );
+      await repository.archiveTask(archived.id);
+
+      final List<Task> range = await repository.getTasksDueBetween(
+        fromDay: DateTime(2026, 11, 5),
+        toDay: DateTime(2026, 11, 5),
+      );
+
+      expect(range, isEmpty);
+    });
+  });
 }
