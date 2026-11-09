@@ -13,6 +13,8 @@ import '../../../core/widgets/app_empty_state.dart';
 import '../../../database/event_repository_impl.dart';
 import '../../../database/responsibility_repository_impl.dart';
 import '../../../shared/enums/app_enums.dart';
+import '../../recurrence/domain/recurrence_rule.dart';
+import '../../recurrence/presentation/recurrence_scope_dialog.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/events_controller.dart';
 import 'event_editor_sheet.dart';
@@ -64,6 +66,38 @@ class _EventDetailsPageState extends ConsumerState<EventDetailsPage> {
   }
 
   Future<void> _delete(Event event) async {
+    final DayEventsController controller = ref.read(
+      dayEventsProvider.notifier,
+    );
+
+    if (event.isOccurrence) {
+      final RecurrenceEditScope? scope = await showRecurrenceScopeDialog(
+        context: context,
+        title: 'حذف رویداد تکراری',
+      );
+      if (scope == null || !mounted) {
+        return;
+      }
+      final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+      final NavigatorState navigator = Navigator.of(context);
+      try {
+        await controller.deleteOccurrence(id: event.id, scope: scope);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              scope == RecurrenceEditScope.allSeries
+                  ? 'کل سری رویداد حذف شد.'
+                  : 'رویداد از برنامه حذف شد.',
+            ),
+          ),
+        );
+        navigator.pop();
+      } on EventRepositoryException catch (error) {
+        messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+
     final bool confirmed = await showAppConfirmDialog(
       context: context,
       title: 'حذف رویداد',
@@ -80,7 +114,7 @@ class _EventDetailsPageState extends ConsumerState<EventDetailsPage> {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     final NavigatorState navigator = Navigator.of(context);
     try {
-      await ref.read(dayEventsProvider.notifier).delete(event.id);
+      await controller.delete(event.id);
       messenger.showSnackBar(
         const SnackBar(content: Text('رویداد حذف شد.')),
       );
@@ -148,13 +182,26 @@ class _EventDetailsPageState extends ConsumerState<EventDetailsPage> {
                 message: 'این رویداد حذف شده یا وجود ندارد.',
               );
             }
-            return _DetailsBody(
-              event: event,
-              dates: dates,
-              responsibility: _responsibilityFor(
-                responsibilities,
-                event.responsibilityId,
-              ),
+            final String? ruleId = event.recurrenceRuleId;
+            return FutureBuilder<RecurrenceRule?>(
+              future: ruleId == null
+                  ? Future<RecurrenceRule?>.value(null)
+                  : ref.read(eventRepositoryProvider).getRecurrenceRule(ruleId),
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<RecurrenceRule?> ruleSnapshot,
+                  ) {
+                    return _DetailsBody(
+                      event: event,
+                      dates: dates,
+                      recurrence: ruleSnapshot.data,
+                      responsibility: _responsibilityFor(
+                        responsibilities,
+                        event.responsibilityId,
+                      ),
+                    );
+                  },
             );
           },
         ),
@@ -179,11 +226,13 @@ class _DetailsBody extends StatelessWidget {
   const _DetailsBody({
     required this.event,
     required this.dates,
+    this.recurrence,
     this.responsibility,
   });
 
   final Event event;
   final JalaliDateService dates;
+  final RecurrenceRule? recurrence;
   final Responsibility? responsibility;
 
   @override
@@ -277,6 +326,26 @@ class _DetailsBody extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           AppSectionHeader(title: 'توضیح'),
           Text(event.description!, style: text.bodyLarge),
+        ],
+        if (recurrence != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.lg),
+          AppSectionHeader(title: 'تکرار'),
+          Text(
+            recurrence!.untilLocalDate == null
+                ? '${recurrence!.frequencyLabel} • بدون تاریخ پایان'
+                : '${recurrence!.frequencyLabel} • تا '
+                      '${dates.formatShort(recurrence!.untilLocalDate!)}',
+            style: text.bodyLarge,
+          ),
+          if (event.isOccurrence) ...<Widget>[
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              'این رویداد یکی از نمونه‌های این سری است.',
+              style: text.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: AppSpacing.lg),
         AppSectionHeader(title: 'وضعیت'),

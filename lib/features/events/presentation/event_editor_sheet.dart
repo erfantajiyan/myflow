@@ -10,7 +10,10 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_confirm_dialog.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../database/event_repository_impl.dart';
+import '../../../shared/enums/app_enums.dart';
 import '../../../database/responsibility_repository_impl.dart';
+import '../../recurrence/domain/recurrence_rule.dart';
+import '../../recurrence/presentation/recurrence_scope_dialog.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/events_controller.dart';
 
@@ -22,6 +25,9 @@ const Key eventEditorTitleKey = Key('eventEditorTitle');
 const Key eventEditorDateKey = Key('eventEditorDate');
 const Key eventEditorStartKey = Key('eventEditorStart');
 const Key eventEditorEndKey = Key('eventEditorEnd');
+const Key eventEditorRecurrenceKey = Key('eventEditorRecurrence');
+const Key eventEditorIntervalKey = Key('eventEditorInterval');
+const Key eventEditorUntilKey = Key('eventEditorUntil');
 
 /// تبدیل ارقام فارسی/عربی به لاتین تا ورودی کاربر قابل تجزیه باشد.
 String _toLatinDigits(String input) {
@@ -142,8 +148,12 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
   late final TextEditingController _locationController;
   late final TextEditingController _descriptionController;
 
+  late final TextEditingController _intervalController;
+  late final TextEditingController _untilController;
+
   late bool _allDay;
   String? _responsibilityId;
+  RecurrenceFrequency? _frequency;
   bool _isSaving = false;
   String? _errorText;
 
@@ -179,6 +189,8 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
     );
     _endController = TextEditingController(text: _formatMinutes(endMinutes));
 
+    _intervalController = TextEditingController(text: '۱');
+    _untilController = TextEditingController();
     _responsibilityId = existing?.responsibilityId;
   }
 
@@ -190,6 +202,8 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
     _endController.dispose();
     _locationController.dispose();
     _descriptionController.dispose();
+    _intervalController.dispose();
+    _untilController.dispose();
     super.dispose();
   }
 
@@ -260,6 +274,34 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
           : _atMinutes(date, endMinutes);
     }
 
+    RecurrenceFrequency? frequency;
+    int interval = 1;
+    DateTime? untilLocalDate;
+    if (widget.existing == null && _frequency != null) {
+      final int? parsedInterval = int.tryParse(
+        _toLatinDigits(_intervalController.text).trim(),
+      );
+      if (parsedInterval == null || parsedInterval < 1) {
+        setState(
+          () => _errorText = 'بازه‌ی تکرار باید یک عدد بزرگ‌تر از صفر باشد.',
+        );
+        return;
+      }
+      interval = parsedInterval;
+      frequency = _frequency;
+      final String untilText = _untilController.text.trim();
+      if (untilText.isNotEmpty) {
+        untilLocalDate = parseJalaliDateInput(untilText, _dates);
+        if (untilLocalDate == null) {
+          setState(
+            () => _errorText =
+                'تاریخ پایان تکرار را به شکل ۱۴۰۴/۰۸/۱۰ وارد کنید یا خالی بگذارید.',
+          );
+          return;
+        }
+      }
+    }
+
     setState(() => _errorText = null);
 
     final DayEventsController controller = ref.read(
@@ -294,6 +336,22 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
         }
       }
 
+      // دامنه‌ی ویرایش سری هم پیش از روشن شدن نشانگر پرسیده می‌شود، به
+      // همان دلیل دیالوگ تداخل.
+      RecurrenceEditScope? scope;
+      if (!mounted) {
+        return;
+      }
+      if (widget.existing?.isOccurrence ?? false) {
+        scope = await showRecurrenceScopeDialog(
+          context: context,
+          title: 'ویرایش رویداد تکراری',
+        );
+        if (scope == null) {
+          return;
+        }
+      }
+
       // نشانگر بارگذاری فقط بعد از تصمیم کاربر روشن می‌شود؛ اگر پیش از
       // دیالوگ روشن شود، پشت مودال می‌چرخد و در تست‌ها pumpAndSettle
       // هرگز آرام نمی‌گیرد.
@@ -314,6 +372,21 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
           allDay: _allDay,
           description: description.isEmpty ? null : description,
           location: location.isEmpty ? null : location,
+          frequency: frequency,
+          interval: interval,
+          untilLocalDate: untilLocalDate,
+        );
+      } else if (widget.existing!.isOccurrence && scope != null) {
+        await controller.updateOccurrence(
+          id: widget.existing!.id,
+          scope: scope,
+          responsibilityId: responsibilityId,
+          title: title,
+          startAt: startAt,
+          endAt: endAt,
+          allDay: _allDay,
+          description: description,
+          location: location,
         );
       } else {
         await controller.updateEvent(
@@ -457,6 +530,64 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
                 ),
               ),
             ],
+          ),
+        const SizedBox(height: AppSpacing.md),
+        if (widget.existing == null) ...<Widget>[
+          DropdownButtonFormField<RecurrenceFrequency?>(
+            key: eventEditorRecurrenceKey,
+            initialValue: _frequency,
+            decoration: const InputDecoration(labelText: 'تکرار'),
+            items: const <DropdownMenuItem<RecurrenceFrequency?>>[
+              DropdownMenuItem<RecurrenceFrequency?>(
+                value: null,
+                child: Text('بدون تکرار'),
+              ),
+              DropdownMenuItem<RecurrenceFrequency?>(
+                value: RecurrenceFrequency.daily,
+                child: Text('روزانه'),
+              ),
+              DropdownMenuItem<RecurrenceFrequency?>(
+                value: RecurrenceFrequency.weekly,
+                child: Text('هفتگی'),
+              ),
+              DropdownMenuItem<RecurrenceFrequency?>(
+                value: RecurrenceFrequency.monthly,
+                child: Text('ماهانه'),
+              ),
+              DropdownMenuItem<RecurrenceFrequency?>(
+                value: RecurrenceFrequency.yearly,
+                child: Text('سالانه'),
+              ),
+            ],
+            onChanged: (RecurrenceFrequency? value) =>
+                setState(() => _frequency = value),
+          ),
+          if (_frequency != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            AppTextField(
+              key: eventEditorIntervalKey,
+              controller: _intervalController,
+              label: 'هر چند بار',
+              hint: '۱',
+              keyboardType: TextInputType.number,
+              helperText: 'مثلاً ۲ یعنی یک‌درمیان. تکرار هفتگی روی همان روز '
+                  'هفته‌ی تاریخ انتخاب‌شده و تکرار ماهانه روی همان روز ماه است.',
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppTextField(
+              key: eventEditorUntilKey,
+              controller: _untilController,
+              label: 'تا تاریخ (اختیاری)',
+              hint: '۱۴۰۴/۱۲/۲۹',
+              keyboardType: TextInputType.datetime,
+              helperText: 'خالی یعنی سری بدون پایان.',
+            ),
+          ],
+        ] else if (widget.existing!.isOccurrence)
+          const Text(
+            'این رویداد بخشی از یک سری تکراری است؛ هنگام ذخیره انتخاب '
+            'می‌کنید تغییر روی کدام بخش اعمال شود.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
         const SizedBox(height: AppSpacing.md),
         AppTextField(

@@ -1,5 +1,13 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:drift/drift.dart';
 
+import '../core/date_time/jalali_date_parts.dart';
+import '../core/date_time/jalali_date_service.dart';
+import '../features/recurrence/domain/event_occurrence.dart';
+import '../features/recurrence/domain/recurrence_expander.dart';
+import '../features/recurrence/domain/recurrence_rule.dart';
 import '../shared/enums/app_enums.dart';
 import 'app_database.dart';
 import 'row_id.dart';
@@ -82,6 +90,15 @@ class Event {
 
   bool get isCompleted => status == EventStatus.completed;
 
+  /// این ردیف یکی از نمونه‌های یک سری تکراری است (شناسه‌ی نمایشی دارد).
+  bool get isOccurrence => recurrenceInstanceKey != null;
+
+  /// شناسه‌ی رویداد اصلی سری؛ برای رویداد معمولی همان [id] است.
+  String get masterId {
+    final int index = id.indexOf('@');
+    return index <= 0 ? id : id.substring(0, index);
+  }
+
   /// آیا این رویداد با روز محلی داده‌شده هم‌پوشانی دارد؟
   ///
   /// قاعده نیم‌باز: رویدادی که دقیقاً ساعت ۰۰:۰۰ تمام می‌شود به روز بعد
@@ -159,29 +176,136 @@ abstract class EventRepository {
     EventStatus? status,
   });
 
+  /// قاعده‌ی تکرار یک سری.
+  Future<RecurrenceRule?> getRecurrenceRule(String id);
+
+  /// ساخت رویداد تکراری: یک ردیف قاعده + یک ردیف master.
+  ///
+  /// نمونه‌ها ذخیره نمی‌شوند و هنگام خواندن بازه محاسبه می‌گردند
+  /// (بخش ۱۱.۶ سند).
+  Future<Event> createRecurringEvent({
+    String? id,
+    required String responsibilityId,
+    required String title,
+    required DateTime startAt,
+    required DateTime endAt,
+    required RecurrenceFrequency frequency,
+    int interval = 1,
+    Set<int> weekdays = const <int>{},
+    int? monthDay,
+    int? monthOfYear,
+    DateTime? untilLocalDate,
+    int? countLimit,
+    bool allDay = false,
+    String? description,
+    String? location,
+    String? projectId,
+    String? timezoneId,
+  });
+
+  /// ویرایش یک نمونه از سری با دامنه‌ی [scope] (بخش ۱۱.۹).
+  Future<void> updateOccurrence({
+    required String occurrenceId,
+    required RecurrenceEditScope scope,
+    String? responsibilityId,
+    String? title,
+    String? description,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool? allDay,
+    EventStatus? status,
+  });
+
+  /// حذف یک نمونه یا کل سری با دامنه‌ی [scope].
+  Future<void> deleteOccurrence({
+    required String occurrenceId,
+    required RecurrenceEditScope scope,
+  });
+
   /// حذف نرم؛ ردیف برای بازیابی می‌ماند.
   Future<void> deleteEvent(String id);
 
   Future<void> permanentlyDeleteEvent(String id);
 }
 
-Event _fromRow(EventRow row) {
+Event _fromRow(
+  EventRow row, {
+  String? occurrenceId,
+  DateTime? startAtUtc,
+  DateTime? endAtUtc,
+  EventStatus? status,
+  String? instanceKey,
+}) {
   return Event(
-    id: row.id,
+    id: occurrenceId ?? row.id,
     responsibilityId: row.responsibilityId,
     title: row.title,
     description: row.description,
     location: row.location,
-    startAtUtc: row.startAtUtc.toUtc(),
-    endAtUtc: row.endAtUtc.toUtc(),
+    startAtUtc: (startAtUtc ?? row.startAtUtc).toUtc(),
+    endAtUtc: (endAtUtc ?? row.endAtUtc).toUtc(),
     timezoneId: row.timezoneId,
     allDay: row.allDay,
-    status: row.status,
+    status: status ?? row.status,
     projectId: row.projectId,
     recurrenceRuleId: row.recurrenceRuleId,
-    recurrenceInstanceKey: row.recurrenceInstanceKey,
+    recurrenceInstanceKey: instanceKey ?? row.recurrenceInstanceKey,
     createdAt: row.createdAt.toUtc(),
     updatedAt: row.updatedAt.toUtc(),
+  );
+}
+
+/// خواندن تاریخ میلادیِ `YYYY-MM-DD` بدون ساعت.
+DateTime _parseDateOnly(String value) {
+  final List<String> parts = value.split('-');
+  return DateTime(
+    int.parse(parts[0]),
+    int.parse(parts[1]),
+    int.parse(parts[2]),
+  );
+}
+
+String _dateOnlyString(DateTime date) {
+  final String month = date.month.toString().padLeft(2, '0');
+  final String day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
+/// `HH:mm[:ss]` → دقیقه‌ی روز.
+int _minutesFromTime(String value) {
+  final List<String> parts = value.split(':');
+  final int hour = int.parse(parts[0]);
+  final int minute = int.parse(parts[1]);
+  return (hour * 60) + minute;
+}
+
+String _timeString(int minutes) {
+  final String hour = (minutes ~/ 60).toString().padLeft(2, '0');
+  final String minute = (minutes % 60).toString().padLeft(2, '0');
+  return '$hour:$minute:00';
+}
+
+RecurrenceRule _ruleFromRow(RecurrenceRuleRow row) {
+  final Set<int> weekdays = row.weekdaysJson == null
+      ? <int>{}
+      : (jsonDecode(row.weekdaysJson!) as List<dynamic>)
+            .map((dynamic value) => value as int)
+            .toSet();
+  return RecurrenceRule(
+    id: row.id,
+    frequency: row.frequency,
+    interval: row.intervalValue,
+    weekdays: weekdays,
+    monthDay: row.monthDay,
+    monthOfYear: row.monthOfYear,
+    startLocalDate: _parseDateOnly(row.startLocalDate),
+    startMinutes: _minutesFromTime(row.localTime),
+    timezoneId: row.timezoneId,
+    untilLocalDate: row.untilLocalDate == null
+        ? null
+        : _parseDateOnly(row.untilLocalDate!),
+    countLimit: row.countLimit,
   );
 }
 
@@ -212,22 +336,11 @@ class DriftEventRepository implements EventRepository {
   final AppDatabase _db;
 
   @override
-  Future<List<Event>> getEventsForDay(DateTime localDay) async {
-    final DateTime dayStartUtc = _startOfDay(localDay).toUtc();
-    final DateTime dayEndUtc = _nextDayStart(localDay).toUtc();
-
-    final rows = await (_db.select(_db.events)
-          ..where((t) => t.deletedAt.isNull())
-          ..where(
-            (t) => t.startAtUtc.isSmallerThanValue(dayEndUtc),
-          )
-          ..where((t) => t.endAtUtc.isBiggerThanValue(dayStartUtc))
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.startAtUtc),
-            (t) => OrderingTerm.asc(t.title),
-          ]))
-        .get();
-    return rows.map(_fromRow).toList();
+  Future<List<Event>> getEventsForDay(DateTime localDay) {
+    return _occurrencesInRange(
+      rangeStartLocal: _startOfDay(localDay),
+      rangeEndLocal: _nextDayStart(localDay),
+    );
   }
 
   @override
@@ -235,30 +348,189 @@ class DriftEventRepository implements EventRepository {
     required DateTime fromDay,
     required DateTime toDay,
   }) async {
-    final DateTime rangeStartUtc = _startOfDay(fromDay).toUtc();
-    final DateTime rangeEndUtc = _nextDayStart(toDay).toUtc();
-    if (!rangeEndUtc.isAfter(rangeStartUtc)) {
+    final DateTime rangeStart = _startOfDay(fromDay);
+    final DateTime rangeEnd = _nextDayStart(toDay);
+    if (!rangeEnd.isAfter(rangeStart)) {
       throw const EventValidationException('بازه‌ی تاریخ نامعتبر است.');
     }
+    return _occurrencesInRange(
+      rangeStartLocal: rangeStart,
+      rangeEndLocal: rangeEnd,
+    );
+  }
 
-    final rows = await (_db.select(_db.events)
+  /// همه‌ی رویدادهای یک بازه: رویدادهای معمولی، نمونه‌های تکراری محاسبه‌شده
+  /// و ردیف‌های استثنا (بخش ۱۱.۶).
+  Future<List<Event>> _occurrencesInRange({
+    required DateTime rangeStartLocal,
+    required DateTime rangeEndLocal,
+  }) async {
+    final DateTime rangeStartUtc = rangeStartLocal.toUtc();
+    final DateTime rangeEndUtc = rangeEndLocal.toUtc();
+
+    final List<EventRow> plainRows = await (_db.select(_db.events)
           ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.recurrenceRuleId.isNull())
           ..where((t) => t.startAtUtc.isSmallerThanValue(rangeEndUtc))
-          ..where((t) => t.endAtUtc.isBiggerThanValue(rangeStartUtc))
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.startAtUtc),
-            (t) => OrderingTerm.asc(t.title),
-          ]))
+          ..where((t) => t.endAtUtc.isBiggerThanValue(rangeStartUtc)))
         .get();
-    return rows.map(_fromRow).toList();
+
+    final List<EventRow> masters = await (_db.select(_db.events)
+          ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.recurrenceRuleId.isNotNull())
+          ..where((t) => t.recurrenceInstanceKey.isNull()))
+        .get();
+
+    final List<Event> result = plainRows.map((EventRow row) => _fromRow(row)).toList();
+    if (masters.isEmpty) {
+      _sortEvents(result);
+      return result;
+    }
+
+    final List<String> ruleIds = masters
+        .map((EventRow row) => row.recurrenceRuleId!)
+        .toSet()
+        .toList();
+    final List<RecurrenceRuleRow> ruleRows = await (_db.select(
+      _db.recurrenceRules,
+    )..where((t) => t.id.isIn(ruleIds)))
+        .get();
+    final Map<String, RecurrenceRuleRow> rulesById = <String, RecurrenceRuleRow>{
+      for (final RecurrenceRuleRow row in ruleRows) row.id: row,
+    };
+    final List<EventRow> exceptionRows = await (_db.select(_db.events)
+          ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.recurrenceInstanceKey.isNotNull())
+          ..where((t) => t.recurrenceRuleId.isIn(ruleIds)))
+        .get();
+    final Map<String, List<EventRow>> exceptionsByRule =
+        <String, List<EventRow>>{};
+    for (final EventRow row in exceptionRows) {
+      (exceptionsByRule[row.recurrenceRuleId!] ??= <EventRow>[]).add(row);
+    }
+
+    const JalaliDateService dates = JalaliDateService();
+    for (final EventRow master in masters) {
+      final RecurrenceRuleRow? ruleRow = rulesById[master.recurrenceRuleId];
+      if (ruleRow == null) {
+        continue;
+      }
+      final RecurrenceRule rule = _ruleFromRow(ruleRow);
+      final List<EventRow> ruleExceptions =
+          exceptionsByRule[rule.id] ?? const <EventRow>[];
+      final Map<String, OccurrenceException> exceptions =
+          <String, OccurrenceException>{
+            for (final EventRow row in ruleExceptions)
+              row.recurrenceInstanceKey!: OccurrenceException(
+                eventId: row.id,
+                instanceKey: row.recurrenceInstanceKey!,
+                startAtUtc: row.startAtUtc.toUtc(),
+                endAtUtc: row.endAtUtc.toUtc(),
+                status: row.status,
+              ),
+          };
+
+      final List<EventOccurrence> occurrences = expandOccurrences(
+        rule: rule,
+        masterEventId: master.id,
+        masterStartAtUtc: master.startAtUtc.toUtc(),
+        masterEndAtUtc: master.endAtUtc.toUtc(),
+        rangeStartLocal: rangeStartLocal,
+        rangeEndLocal: rangeEndLocal,
+        dates: dates,
+        exceptions: exceptions,
+      );
+
+      for (final EventOccurrence occurrence in occurrences) {
+        EventRow base = master;
+        if (occurrence.sourceEventId != null) {
+          for (final EventRow row in ruleExceptions) {
+            if (row.id == occurrence.sourceEventId) {
+              base = row;
+              break;
+            }
+          }
+        }
+        result.add(
+          _fromRow(
+            base,
+            occurrenceId: occurrence.id,
+            startAtUtc: occurrence.startAtUtc,
+            endAtUtc: occurrence.endAtUtc,
+            status: occurrence.status,
+            instanceKey: occurrence.instanceKey,
+          ),
+        );
+      }
+    }
+
+    _sortEvents(result);
+    return result;
+  }
+
+  void _sortEvents(List<Event> events) {
+    events.sort((Event a, Event b) {
+      final int byStart = a.startAtUtc.compareTo(b.startAtUtc);
+      return byStart != 0 ? byStart : a.title.compareTo(b.title);
+    });
   }
 
   @override
   Future<Event?> getEventById(String id) async {
+    if (id.contains('@')) {
+      return _getOccurrenceById(id);
+    }
     final EventRow? row = await (_db.select(_db.events)
           ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
         .getSingleOrNull();
     return row == null ? null : _fromRow(row);
+  }
+
+  /// خواندن یک نمونه‌ی تکراری با شناسه‌ی نمایشی `{master}@{key}`.
+  Future<Event?> _getOccurrenceById(String displayId) async {
+    final int separator = displayId.indexOf('@');
+    final String masterId = displayId.substring(0, separator);
+    final String instanceKey = displayId.substring(separator + 1);
+
+    final EventRow? master = await (_db.select(_db.events)
+          ..where((t) => t.id.equals(masterId) & t.deletedAt.isNull()))
+        .getSingleOrNull();
+    if (master == null) {
+      return null;
+    }
+    final String? ruleId = master.recurrenceRuleId;
+    if (ruleId == null) {
+      return null;
+    }
+
+    final EventRow? exception = await (_db.select(_db.events)
+          ..where(
+            (t) =>
+                t.recurrenceRuleId.equals(ruleId) &
+                t.recurrenceInstanceKey.equals(instanceKey) &
+                t.deletedAt.isNull(),
+          ))
+        .getSingleOrNull();
+    if (exception != null) {
+      return _fromRow(
+        exception,
+        occurrenceId: displayId,
+        instanceKey: instanceKey,
+      );
+    }
+
+    // نمونه ذخیره نشده است؛ همان بازه‌ی روز نمونه را می‌سازیم.
+    final DateTime keyDate = _parseDateOnly(instanceKey);
+    final List<Event> inRange = await _occurrencesInRange(
+      rangeStartLocal: keyDate.subtract(const Duration(days: 1)),
+      rangeEndLocal: keyDate.add(const Duration(days: 2)),
+    );
+    for (final Event event in inRange) {
+      if (event.id == displayId) {
+        return event;
+      }
+    }
+    return null;
   }
 
   @override
@@ -275,22 +547,23 @@ class DriftEventRepository implements EventRepository {
       );
     }
 
-    final query = _db.select(_db.events)
-      ..where((t) => t.deletedAt.isNull())
-      ..where((t) => t.startAtUtc.isSmallerThanValue(endUtc))
-      ..where((t) => t.endAtUtc.isBiggerThanValue(startUtc))
-      ..where(
-        (t) => t.status.equalsValue(EventStatus.cancelled).not(),
-      )
-      ..orderBy([
-        (t) => OrderingTerm.asc(t.startAtUtc),
-      ]);
-    if (excludeEventId != null) {
-      query.where((t) => t.id.equals(excludeEventId).not());
-    }
-
-    final List<EventRow> rows = await query.get();
-    return rows.map(_fromRow).toList();
+    // تداخل باید نمونه‌های تکراری را هم ببیند (بخش ۱۱.۶: مصرف‌کنندگان
+    // expand)، پس از همان مسیر بازه‌ای خوانده می‌شود.
+    final List<Event> candidates = await _occurrencesInRange(
+      rangeStartLocal: _startOfDay(startAt),
+      rangeEndLocal: _nextDayStart(endAt),
+    );
+    return candidates.where((Event event) {
+      if (event.status == EventStatus.cancelled) {
+        return false;
+      }
+      if (excludeEventId != null &&
+          (event.id == excludeEventId || event.masterId == excludeEventId)) {
+        return false;
+      }
+      return event.startAtUtc.isBefore(endUtc) &&
+          event.endAtUtc.isAfter(startUtc);
+    }).toList();
   }
 
   @override
@@ -443,6 +716,514 @@ class DriftEventRepository implements EventRepository {
   @override
   Future<void> permanentlyDeleteEvent(String id) async {
     await (_db.delete(_db.events)..where((t) => t.id.equals(id))).go();
+  }
+
+  @override
+  Future<RecurrenceRule?> getRecurrenceRule(String id) async {
+    final RecurrenceRuleRow? row = await (_db.select(_db.recurrenceRules)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    return row == null ? null : _ruleFromRow(row);
+  }
+
+  @override
+  Future<Event> createRecurringEvent({
+    String? id,
+    required String responsibilityId,
+    required String title,
+    required DateTime startAt,
+    required DateTime endAt,
+    required RecurrenceFrequency frequency,
+    int interval = 1,
+    Set<int> weekdays = const <int>{},
+    int? monthDay,
+    int? monthOfYear,
+    DateTime? untilLocalDate,
+    int? countLimit,
+    bool allDay = false,
+    String? description,
+    String? location,
+    String? projectId,
+    String? timezoneId,
+  }) async {
+    if (interval < 1) {
+      throw const EventValidationException('بازه‌ی تکرار باید حداقل ۱ باشد.');
+    }
+    final String validatedTitle = _validateTitle(title);
+    final DateTime startLocal = _startOfDay(startAt);
+    final int startMinutes = allDay
+        ? 0
+        : (startAt.hour * 60) + startAt.minute;
+    final DateTime effectiveEnd = allDay ? _nextDayStart(startAt) : endAt;
+    if (!effectiveEnd.isAfter(startAt)) {
+      throw const EventValidationException(
+        'پایان رویداد باید بعد از شروع آن باشد.',
+      );
+    }
+
+    const JalaliDateService dates = JalaliDateService();
+    final JalaliDateParts startParts = dates.partsOf(startAt);
+    if (frequency == RecurrenceFrequency.yearly && monthOfYear == null) {
+      throw const EventValidationException(
+        'برای تکرار سالانه باید ماه شمسی مشخص شود.',
+      );
+    }
+    final Set<int> effectiveWeekdays = frequency == RecurrenceFrequency.weekly
+        ? (weekdays.isEmpty ? <int>{dates.weekdayIndex(startAt)} : weekdays)
+        : const <int>{};
+
+    final String ruleId = newRowId('rule');
+    final String eventId = id ?? _newId();
+    final String tz = timezoneId ?? DateTime.now().timeZoneName;
+    final DateTime now = DateTime.now().toUtc();
+
+    await _db.transaction(() async {
+      await _db.into(_db.recurrenceRules).insert(
+            RecurrenceRulesCompanion.insert(
+              id: ruleId,
+              frequency: frequency,
+              intervalValue: Value<int>(interval),
+              startLocalDate: _dateOnlyString(startLocal),
+              localTime: _timeString(startMinutes),
+              timezoneId: tz,
+              startAtUtc: startAt.toUtc(),
+              createdAt: now,
+              weekdaysJson: Value<String?>(
+                effectiveWeekdays.isEmpty
+                    ? null
+                    : jsonEncode(effectiveWeekdays.toList()..sort()),
+              ),
+              monthDay: Value<int?>(
+                frequency == RecurrenceFrequency.monthly ||
+                        frequency == RecurrenceFrequency.yearly
+                    ? (monthDay ?? startParts.day)
+                    : null,
+              ),
+              monthOfYear: Value<int?>(
+                frequency == RecurrenceFrequency.yearly
+                    ? (monthOfYear ?? startParts.month)
+                    : null,
+              ),
+              untilLocalDate: Value<String?>(
+                untilLocalDate == null
+                    ? null
+                    : _dateOnlyString(untilLocalDate),
+              ),
+              countLimit: Value<int?>(countLimit),
+            ),
+          );
+      await _db.into(_db.events).insert(
+            EventsCompanion.insert(
+              id: eventId,
+              responsibilityId: responsibilityId,
+              title: validatedTitle,
+              startAtUtc: allDay ? startLocal.toUtc() : startAt.toUtc(),
+              endAtUtc: effectiveEnd.toUtc(),
+              timezoneId: tz,
+              description: Value<String?>(description),
+              location: Value<String?>(location),
+              allDay: Value<bool>(allDay),
+              projectId: Value<String?>(projectId),
+              recurrenceRuleId: Value<String?>(ruleId),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+    });
+
+    final Event? inserted = await getEventById(eventId);
+    if (inserted == null) {
+      throw EventNotFoundException(eventId);
+    }
+    return inserted;
+  }
+
+  @override
+  Future<void> updateOccurrence({
+    required String occurrenceId,
+    required RecurrenceEditScope scope,
+    String? responsibilityId,
+    String? title,
+    String? description,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool? allDay,
+    EventStatus? status,
+  }) async {
+    final Event? occurrence = await getEventById(occurrenceId);
+    if (occurrence == null || !occurrence.isOccurrence) {
+      throw EventNotFoundException(occurrenceId);
+    }
+    final Event? master = await getEventById(occurrence.masterId);
+    if (master == null || master.recurrenceRuleId == null) {
+      throw EventNotFoundException(occurrenceId);
+    }
+    final RecurrenceRule? rule = await getRecurrenceRule(
+      master.recurrenceRuleId!,
+    );
+    if (rule == null) {
+      throw EventNotFoundException(occurrenceId);
+    }
+
+    switch (scope) {
+      case RecurrenceEditScope.allSeries:
+        await _db.transaction(() async {
+          await updateEvent(
+            id: master.id,
+            responsibilityId: responsibilityId,
+            title: title,
+            description: description,
+            location: location,
+            startAt: startAt,
+            endAt: endAt,
+            allDay: allDay,
+            status: status,
+          );
+          if (!(allDay ?? master.allDay) && startAt != null) {
+            await (_db.update(
+              _db.recurrenceRules,
+            )..where((t) => t.id.equals(rule.id)))
+                .write(
+              RecurrenceRulesCompanion(
+                localTime: Value<String>(
+                  _timeString((startAt.hour * 60) + startAt.minute),
+                ),
+              ),
+            );
+          }
+        });
+
+      case RecurrenceEditScope.thisOnly:
+        await _upsertException(
+          master: master,
+          occurrence: occurrence,
+          title: title,
+          responsibilityId: responsibilityId,
+          description: description,
+          location: location,
+          startAt: startAt,
+          endAt: endAt,
+          allDay: allDay,
+          status: status ?? EventStatus.planned,
+        );
+
+      case RecurrenceEditScope.thisAndFollowing:
+        await _splitSeries(
+          master: master,
+          rule: rule,
+          occurrence: occurrence,
+          title: title,
+          responsibilityId: responsibilityId,
+          description: description,
+          location: location,
+          startAt: startAt,
+          endAt: endAt,
+          allDay: allDay,
+          status: status,
+        );
+    }
+  }
+
+  @override
+  Future<void> deleteOccurrence({
+    required String occurrenceId,
+    required RecurrenceEditScope scope,
+  }) async {
+    final Event? occurrence = await getEventById(occurrenceId);
+    if (occurrence == null) {
+      throw EventNotFoundException(occurrenceId);
+    }
+    if (!occurrence.isOccurrence) {
+      await deleteEvent(occurrenceId);
+      return;
+    }
+    final Event? master = await getEventById(occurrence.masterId);
+    if (master == null || master.recurrenceRuleId == null) {
+      await deleteEvent(occurrence.masterId);
+      return;
+    }
+    final String ruleId = master.recurrenceRuleId!;
+
+    switch (scope) {
+      case RecurrenceEditScope.allSeries:
+        await _db.transaction(() async {
+          await deleteEvent(master.id);
+          await (_db.update(_db.events)..where(
+                (t) =>
+                    t.recurrenceRuleId.equals(ruleId) & t.deletedAt.isNull(),
+              ))
+              .write(
+            EventsCompanion(
+              deletedAt: Value<DateTime>(DateTime.now().toUtc()),
+              updatedAt: Value<DateTime>(DateTime.now().toUtc()),
+            ),
+          );
+        });
+
+      case RecurrenceEditScope.thisOnly:
+        await _upsertException(
+          master: master,
+          occurrence: occurrence,
+          status: EventStatus.cancelled,
+        );
+
+      case RecurrenceEditScope.thisAndFollowing:
+        final String? key = occurrence.recurrenceInstanceKey;
+        if (key == null) {
+          return;
+        }
+        final DateTime boundary = _parseDateOnly(key);
+        await _db.transaction(() async {
+          await _closeRuleBefore(ruleId, boundary);
+          await (_db.update(_db.events)..where(
+                (t) =>
+                    t.recurrenceRuleId.equals(ruleId) &
+                    t.recurrenceInstanceKey.isBiggerOrEqualValue(key) &
+                    t.deletedAt.isNull(),
+              ))
+              .write(
+            EventsCompanion(
+              deletedAt: Value<DateTime>(DateTime.now().toUtc()),
+              updatedAt: Value<DateTime>(DateTime.now().toUtc()),
+            ),
+          );
+        });
+    }
+  }
+
+  /// ذخیره‌ی ردیف استثنا برای یک نمونه (ساخت/ویرایش/لغو).
+  Future<void> _upsertException({
+    required Event master,
+    required Event occurrence,
+    String? responsibilityId,
+    String? title,
+    String? description,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool? allDay,
+    required EventStatus status,
+  }) async {
+    final String ruleId = master.recurrenceRuleId!;
+    final String key =
+        occurrence.recurrenceInstanceKey ??
+        _dateOnlyString(occurrence.startLocal);
+    final bool nextAllDay = allDay ?? master.allDay;
+    DateTime startLocal = startAt ?? occurrence.startLocal;
+    DateTime endLocal = endAt ?? occurrence.endLocal;
+    if (nextAllDay) {
+      startLocal = _startOfDay(startLocal);
+      endLocal = _nextDayStart(startLocal);
+    }
+    if (!endLocal.isAfter(startLocal)) {
+      throw const EventValidationException(
+        'پایان رویداد باید بعد از شروع آن باشد.',
+      );
+    }
+
+    final EventRow? existing = await (_db.select(_db.events)..where(
+          (t) =>
+              t.recurrenceRuleId.equals(ruleId) &
+              t.recurrenceInstanceKey.equals(key) &
+              t.deletedAt.isNull(),
+        ))
+        .getSingleOrNull();
+    final DateTime now = DateTime.now().toUtc();
+
+    if (existing == null) {
+      await _db.into(_db.events).insert(
+            EventsCompanion.insert(
+              id: newRowId('exc'),
+              responsibilityId: responsibilityId ?? master.responsibilityId,
+              title: _validateTitle(title ?? master.title),
+              startAtUtc: startLocal.toUtc(),
+              endAtUtc: endLocal.toUtc(),
+              timezoneId: master.timezoneId,
+              description: Value<String?>(description ?? master.description),
+              location: Value<String?>(location ?? master.location),
+              allDay: Value<bool>(nextAllDay),
+              status: Value<EventStatus>(status),
+              projectId: Value<String?>(master.projectId),
+              recurrenceRuleId: Value<String?>(ruleId),
+              recurrenceInstanceKey: Value<String?>(key),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      return;
+    }
+
+    await (_db.update(_db.events)..where((t) => t.id.equals(existing.id)))
+        .write(
+      EventsCompanion(
+        responsibilityId: responsibilityId == null
+            ? const Value<String>.absent()
+            : Value<String>(responsibilityId),
+        title: title == null
+            ? const Value<String>.absent()
+            : Value<String>(_validateTitle(title)),
+        description: description == null
+            ? const Value<String?>.absent()
+            : Value<String?>(description),
+        location: location == null
+            ? const Value<String?>.absent()
+            : Value<String?>(location),
+        startAtUtc: Value<DateTime>(startLocal.toUtc()),
+        endAtUtc: Value<DateTime>(endLocal.toUtc()),
+        allDay: Value<bool>(nextAllDay),
+        status: Value<EventStatus>(status),
+        updatedAt: Value<DateTime>(now),
+      ),
+    );
+  }
+
+  /// پایان دادن سری قبل از روز [boundary] (برای «این و بعدی‌ها»).
+  Future<void> _closeRuleBefore(String ruleId, DateTime boundary) async {
+    final DateTime lastDay = DateTime(
+      boundary.year,
+      boundary.month,
+      boundary.day - 1,
+    );
+    await (_db.update(
+      _db.recurrenceRules,
+    )..where((t) => t.id.equals(ruleId)))
+        .write(
+      RecurrenceRulesCompanion(
+        untilLocalDate: Value<String?>(_dateOnlyString(lastDay)),
+      ),
+    );
+  }
+
+  /// شکستن سری در نمونه‌ی [occurrence]: سری قبلی بسته و سری تازه ساخته
+  /// می‌شود (بخش ۱۱.۹ سند).
+  Future<void> _splitSeries({
+    required Event master,
+    required RecurrenceRule rule,
+    required Event occurrence,
+    String? responsibilityId,
+    String? title,
+    String? description,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool? allDay,
+    EventStatus? status,
+  }) async {
+    final String key = occurrence.recurrenceInstanceKey!;
+    final DateTime boundary = _parseDateOnly(key);
+    final bool nextAllDay = allDay ?? master.allDay;
+    DateTime newStart = startAt ?? occurrence.startLocal;
+    DateTime newEnd = endAt ?? occurrence.endLocal;
+    if (nextAllDay) {
+      newStart = _startOfDay(newStart);
+      newEnd = _nextDayStart(newStart);
+    }
+    if (!newEnd.isAfter(newStart)) {
+      throw const EventValidationException(
+        'پایان رویداد باید بعد از شروع آن باشد.',
+      );
+    }
+
+    final int? remaining = rule.countLimit == null
+        ? null
+        : math.max(
+            1,
+            rule.countLimit! -
+                await _countOccurrencesBefore(rule, master, boundary),
+          );
+
+    final String newRuleId = newRowId('rule');
+    final String newMasterId = newRowId('evt');
+    final DateTime now = DateTime.now().toUtc();
+
+    await _db.transaction(() async {
+      await _closeRuleBefore(rule.id, boundary);
+
+      await _db.into(_db.recurrenceRules).insert(
+            RecurrenceRulesCompanion.insert(
+              id: newRuleId,
+              frequency: rule.frequency,
+              intervalValue: Value<int>(rule.interval),
+              startLocalDate: _dateOnlyString(_startOfDay(newStart)),
+              localTime: _timeString(
+                nextAllDay ? 0 : (newStart.hour * 60) + newStart.minute,
+              ),
+              timezoneId: rule.timezoneId,
+              startAtUtc: newStart.toUtc(),
+              createdAt: now,
+              weekdaysJson: Value<String?>(
+                rule.weekdays.isEmpty
+                    ? null
+                    : jsonEncode(rule.weekdays.toList()..sort()),
+              ),
+              monthDay: Value<int?>(rule.monthDay),
+              monthOfYear: Value<int?>(rule.monthOfYear),
+              untilLocalDate: Value<String?>(
+                rule.untilLocalDate == null
+                    ? null
+                    : _dateOnlyString(rule.untilLocalDate!),
+              ),
+              countLimit: Value<int?>(remaining),
+            ),
+          );
+
+      await _db.into(_db.events).insert(
+            EventsCompanion.insert(
+              id: newMasterId,
+              responsibilityId: responsibilityId ?? master.responsibilityId,
+              title: _validateTitle(title ?? master.title),
+              startAtUtc: newStart.toUtc(),
+              endAtUtc: newEnd.toUtc(),
+              timezoneId: master.timezoneId,
+              description: Value<String?>(description ?? master.description),
+              location: Value<String?>(location ?? master.location),
+              allDay: Value<bool>(nextAllDay),
+              status: Value<EventStatus>(status ?? master.status),
+              projectId: Value<String?>(master.projectId),
+              recurrenceRuleId: Value<String?>(newRuleId),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+
+      // استثناهای بعد از مرز به سری جدید منتقل می‌شوند؛ استثنای خودِ مرز
+      // با master جدید جایگزین شده است.
+      await (_db.delete(_db.events)..where(
+            (t) =>
+                t.recurrenceRuleId.equals(rule.id) &
+                t.recurrenceInstanceKey.equals(key),
+          ))
+          .go();
+      await (_db.update(_db.events)..where(
+            (t) =>
+                t.recurrenceRuleId.equals(rule.id) &
+                t.recurrenceInstanceKey.isBiggerThanValue(key) &
+                t.deletedAt.isNull(),
+          ))
+          .write(
+        EventsCompanion(recurrenceRuleId: Value<String?>(newRuleId)),
+      );
+    });
+  }
+
+  /// تعداد نمونه‌های برنامه‌ریزی‌شده‌ی قبل از [boundary]، برای محاسبه‌ی
+  /// count_limit باقی‌مانده هنگام شکستن سری.
+  Future<int> _countOccurrencesBefore(
+    RecurrenceRule rule,
+    Event master,
+    DateTime boundary,
+  ) async {
+    final List<EventOccurrence> occurrences = expandOccurrences(
+      rule: rule,
+      masterEventId: master.id,
+      masterStartAtUtc: master.startAtUtc,
+      masterEndAtUtc: master.endAtUtc,
+      rangeStartLocal: rule.startLocalDate,
+      rangeEndLocal: boundary,
+      dates: const JalaliDateService(),
+    );
+    return occurrences.length;
   }
 
   String _newId() => newRowId('evt');

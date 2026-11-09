@@ -206,4 +206,94 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('جلسه‌ی امروز'), findsOneWidget);
   });
+
+  testWidgets('ساخت رویداد هفتگی در همان روز هفته‌ی بعد هم دیده می‌شود', (
+    WidgetTester tester,
+  ) async {
+    await openEventsPage(tester);
+
+    await tester.tap(find.text('رویداد جدید'));
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldOf(eventEditorTitleKey), 'کلاس روش تحقیق');
+    await tester.tap(find.byKey(eventEditorRecurrenceKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('هفتگی').last);
+    await tester.pumpAndSettle();
+    await saveSheet(tester);
+    expectSheetClosed();
+
+    expect(find.text('کلاس روش تحقیق'), findsOneWidget);
+
+    for (int i = 0; i < 7; i++) {
+      await tester.tap(find.byTooltip('روز بعد'));
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text('کلاس روش تحقیق'), findsOneWidget);
+  });
+
+  testWidgets('ویرایش نمونه‌ی تکراری دامنه‌ی اعمال را می‌پرسد', (
+    WidgetTester tester,
+  ) async {
+    await openEventsPage(tester);
+
+    await tester.tap(find.text('رویداد جدید'));
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldOf(eventEditorTitleKey), 'کلاس روش تحقیق');
+    await tester.tap(find.byKey(eventEditorRecurrenceKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('هفتگی').last);
+    await tester.pumpAndSettle();
+    await saveSheet(tester);
+    expectSheetClosed();
+
+    await tester.tap(find.text('کلاس روش تحقیق'));
+    await tester.pumpAndSettle();
+    expect(find.text('تکرار'), findsOneWidget);
+    expect(find.text('هر هفته • بدون تاریخ پایان'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('ویرایش رویداد'));
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldOf(eventEditorTitleKey), 'کارگاه');
+    await saveSheet(tester);
+
+    expect(find.text('ویرایش رویداد تکراری'), findsOneWidget);
+    await tester.tap(find.text('این مورد'));
+    await tester.pumpAndSettle();
+    expectSheetClosed();
+  });
+
+  testWidgets('حذف نمونه‌ی تکراری فقط همان روز را برمی‌دارد', (
+    WidgetTester tester,
+  ) async {
+    await openEventsPage(tester);
+
+    await tester.tap(find.text('رویداد جدید'));
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldOf(eventEditorTitleKey), 'کلاس روش تحقیق');
+    await tester.tap(find.byKey(eventEditorRecurrenceKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('هفتگی').last);
+    await tester.pumpAndSettle();
+    await saveSheet(tester);
+    expectSheetClosed();
+
+    await tester.tap(find.text('کلاس روش تحقیق'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('حذف رویداد'));
+    await tester.pumpAndSettle();
+    expect(find.text('حذف رویداد تکراری'), findsOneWidget);
+    await tester.tap(find.text('این مورد'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('برای این روز رویدادی ثبت نشده'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('روز بعد'));
+    await tester.pumpAndSettle();
+    for (int i = 0; i < 6; i++) {
+      await tester.tap(find.byTooltip('روز بعد'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('کلاس روش تحقیق'), findsOneWidget);
+  });
 }

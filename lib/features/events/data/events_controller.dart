@@ -5,6 +5,7 @@ import '../../../core/providers/data_revision_provider.dart';
 import '../../../database/database_providers.dart';
 import '../../../database/event_repository_impl.dart';
 import '../../../shared/enums/app_enums.dart';
+import '../../recurrence/domain/recurrence_rule.dart';
 
 /// تنها مسیر دسترسی UI به repository رویدادها.
 final Provider<EventRepository> eventRepositoryProvider =
@@ -73,6 +74,9 @@ class DayEventsController extends AsyncNotifier<List<Event>> {
   }
 
   /// ساخت رویداد و رفتن به روز همان رویداد.
+  ///
+  /// اگر [frequency] داده شود، سری تکراری ساخته می‌شود و `null` یعنی
+  /// رویداد معمولی.
   Future<Event> create({
     required String responsibilityId,
     required String title,
@@ -82,17 +86,35 @@ class DayEventsController extends AsyncNotifier<List<Event>> {
     String? description,
     String? location,
     EventStatus status = EventStatus.planned,
+    RecurrenceFrequency? frequency,
+    int interval = 1,
+    DateTime? untilLocalDate,
+    int? countLimit,
   }) async {
-    final Event created = await _repository.insertEvent(
-      responsibilityId: responsibilityId,
-      title: title,
-      startAt: startAt,
-      endAt: endAt,
-      allDay: allDay,
-      description: description,
-      location: location,
-      status: status,
-    );
+    final Event created = frequency == null
+        ? await _repository.insertEvent(
+            responsibilityId: responsibilityId,
+            title: title,
+            startAt: startAt,
+            endAt: endAt,
+            allDay: allDay,
+            description: description,
+            location: location,
+            status: status,
+          )
+        : await _repository.createRecurringEvent(
+            responsibilityId: responsibilityId,
+            title: title,
+            startAt: startAt,
+            endAt: endAt,
+            frequency: frequency,
+            interval: interval,
+            untilLocalDate: untilLocalDate,
+            countLimit: countLimit,
+            allDay: allDay,
+            description: description,
+            location: location,
+          );
     ref.read(selectedEventDayProvider.notifier).select(created.startLocal);
     ref.read(dataRevisionProvider.notifier).bump();
     await refresh();
@@ -121,6 +143,54 @@ class DayEventsController extends AsyncNotifier<List<Event>> {
       allDay: allDay,
       status: status,
     );
+    ref.read(dataRevisionProvider.notifier).bump();
+    await refresh();
+  }
+
+  /// ویرایش یک نمونه با دامنه‌ی مشخص (این/بعدی‌ها/کل سری).
+  Future<void> updateOccurrence({
+    required String id,
+    required RecurrenceEditScope scope,
+    String? responsibilityId,
+    String? title,
+    String? description,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool? allDay,
+    EventStatus? status,
+  }) async {
+    await _repository.updateOccurrence(
+      occurrenceId: id,
+      scope: scope,
+      responsibilityId: responsibilityId,
+      title: title,
+      description: description,
+      location: location,
+      startAt: startAt,
+      endAt: endAt,
+      allDay: allDay,
+      status: status,
+    );
+    ref.read(dataRevisionProvider.notifier).bump();
+    await refresh();
+  }
+
+  /// قاعده‌ی تکرار یک رویداد، برای نمایش در جزئیات.
+  Future<RecurrenceRule?> recurrenceRuleFor(Event event) {
+    final String? ruleId = event.recurrenceRuleId;
+    if (ruleId == null) {
+      return Future<RecurrenceRule?>.value(null);
+    }
+    return _repository.getRecurrenceRule(ruleId);
+  }
+
+  /// حذف با دامنه (فقط این مورد/این و بعدی‌ها/کل سری).
+  Future<void> deleteOccurrence({
+    required String id,
+    required RecurrenceEditScope scope,
+  }) async {
+    await _repository.deleteOccurrence(occurrenceId: id, scope: scope);
     ref.read(dataRevisionProvider.notifier).bump();
     await refresh();
   }
