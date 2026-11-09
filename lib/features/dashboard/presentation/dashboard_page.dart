@@ -27,6 +27,8 @@ import '../../responsibilities/data/responsibilities_controller.dart';
 import '../../tasks/data/tasks_controller.dart';
 import '../../timeline/presentation/timeline_layout.dart';
 import '../data/dashboard_controller.dart';
+import '../../settings/data/settings_controller.dart';
+import '../../settings/domain/app_settings.dart';
 
 const Key dashboardEventsSectionKey = Key('dashboardEventsSection');
 const Key dashboardTasksSectionKey = Key('dashboardTasksSection');
@@ -278,7 +280,7 @@ class _EventsSection extends StatelessWidget {
   }
 }
 
-class _DashboardEventRow extends StatelessWidget {
+class _DashboardEventRow extends ConsumerWidget {
   const _DashboardEventRow({
     required this.event,
     required this.responsibility,
@@ -292,7 +294,8 @@ class _DashboardEventRow extends StatelessWidget {
   final bool isNext;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppSettings settings = ref.watch(currentSettingsProvider);
     final TextTheme text = Theme.of(context).textTheme;
     final Color accent = responsibility?.color ?? AppColors.textSecondary;
 
@@ -315,14 +318,14 @@ class _DashboardEventRow extends StatelessWidget {
                   Text(
                     event.allDay
                         ? 'تمام‌روز'
-                        : dates.formatTime(event.startLocal),
+                        : settings.formatTime(event.startLocal),
                     style: text.bodySmall?.copyWith(
                       color: AppColors.textPrimary,
                     ),
                   ),
                   if (!event.allDay)
                     Text(
-                      'تا ${dates.formatTime(event.endLocal)}',
+                      'تا ${settings.formatTime(event.endLocal)}',
                       style: text.labelSmall?.copyWith(
                         color: AppColors.textSecondary,
                       ),

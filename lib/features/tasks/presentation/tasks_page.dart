@@ -19,6 +19,8 @@ import '../../../shared/enums/app_enums.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/tasks_controller.dart';
 import 'task_editor_sheet.dart';
+import '../../settings/data/settings_controller.dart';
+import '../../settings/domain/app_settings.dart';
 
 /// وظایف — بخش ۷.۴ سند.
 class TasksPage extends ConsumerWidget {
@@ -182,7 +184,7 @@ class _TaskTile extends ConsumerWidget {
 
     final List<String> meta = <String>[
       ?responsibilityName,
-      _dueLabel(jalali, now),
+      _dueLabel(jalali, now, ref.watch(currentSettingsProvider)),
       _priorityLabel(task.priority),
       if (task.estimatedMinutes != null)
         '${PersianDigits.fromInt(task.estimatedMinutes!)} دقیقه',
@@ -263,14 +265,23 @@ class _TaskTile extends ConsumerWidget {
     );
   }
 
-  String _dueLabel(JalaliDateService jalali, DateTime now) {
+  String _dueLabel(
+    JalaliDateService jalali,
+    DateTime now,
+    AppSettings settings,
+  ) {
     final DateTime? due = task.dueDateLocal;
     if (due == null) {
       return 'بدون سررسید';
     }
     final String date = jalali.formatShort(due);
     if (task.dueTime != null) {
-      return '$date ${PersianDigits.convert(task.dueTime!.substring(0, 5))}';
+      final List<String> parts = task.dueTime!.split(':');
+      final int minutes =
+          (int.tryParse(parts[0]) ?? 0) * 60 +
+          (parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0);
+      final DateTime time = DateTime(2000, 1, 1, minutes ~/ 60, minutes % 60);
+      return '$date ${settings.formatTime(time)}';
     }
     return date;
   }

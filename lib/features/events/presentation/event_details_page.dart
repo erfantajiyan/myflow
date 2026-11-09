@@ -15,9 +15,12 @@ import '../../../database/responsibility_repository_impl.dart';
 import '../../../shared/enums/app_enums.dart';
 import '../../recurrence/domain/recurrence_rule.dart';
 import '../../recurrence/presentation/recurrence_scope_dialog.dart';
+import '../../reminders/data/reminders_controller.dart';
+import '../../reminders/domain/reminder.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/events_controller.dart';
 import 'event_editor_sheet.dart';
+import '../../settings/data/settings_controller.dart';
 
 /// جزئیات یک رویداد — بخش ۷.۳ سند.
 ///
@@ -222,7 +225,7 @@ Responsibility? _responsibilityFor(
   return null;
 }
 
-class _DetailsBody extends StatelessWidget {
+class _DetailsBody extends ConsumerWidget {
   const _DetailsBody({
     required this.event,
     required this.dates,
@@ -236,7 +239,10 @@ class _DetailsBody extends StatelessWidget {
   final Responsibility? responsibility;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Reminder? reminder = ref
+        .watch(eventReminderProvider(event.masterId))
+        .value;
     final TextTheme text = Theme.of(context).textTheme;
     final DateTime start = event.startLocal;
     final DateTime end = event.endLocal;
@@ -244,7 +250,8 @@ class _DetailsBody extends StatelessWidget {
 
     final String timeLabel = event.allDay
         ? 'تمام‌روز • ${dates.formatLong(start)}'
-        : '${dates.formatTime(start)} تا ${dates.formatTime(end)}';
+        : '${ref.watch(currentSettingsProvider).formatTime(start)} تا '
+              '${ref.watch(currentSettingsProvider).formatTime(end)}';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -347,6 +354,14 @@ class _DetailsBody extends StatelessWidget {
             ),
           ],
         ],
+        const SizedBox(height: AppSpacing.lg),
+        AppSectionHeader(title: 'یادآوری'),
+        Text(
+          reminder == null
+              ? 'بدون یادآوری'
+              : ReminderOffset.labelFor(reminder.effectiveMinutesBefore),
+          style: text.bodyLarge,
+        ),
         const SizedBox(height: AppSpacing.lg),
         AppSectionHeader(title: 'وضعیت'),
         Text(

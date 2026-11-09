@@ -18,6 +18,8 @@ import '../../../database/responsibility_repository_impl.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/events_controller.dart';
 import 'event_editor_sheet.dart';
+import '../../settings/data/settings_controller.dart';
+import '../../settings/domain/app_settings.dart';
 
 /// رویدادها — لیست روزانه، بخش ۷.۳ و ۸.۲ سند.
 ///
@@ -136,7 +138,7 @@ class _EventTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final JalaliDateService dates = ref.watch(jalaliDateServiceProvider);
+    final AppSettings settings = ref.watch(currentSettingsProvider);
     final TextTheme text = Theme.of(context).textTheme;
     final Color accent = responsibility?.color ?? AppColors.textSecondary;
     final String? location = event.location;
@@ -158,11 +160,11 @@ class _EventTile extends ConsumerWidget {
                   Text('تمام‌روز', style: text.labelLarge)
                 else ...<Widget>[
                   Text(
-                    dates.formatTime(event.startLocal),
+                    settings.formatTime(event.startLocal),
                     style: text.titleSmall,
                   ),
                   Text(
-                    'تا ${dates.formatTime(event.endLocal)}',
+                    'تا ${settings.formatTime(event.endLocal)}',
                     style: text.bodySmall?.copyWith(
                       color: AppColors.textSecondary,
                     ),

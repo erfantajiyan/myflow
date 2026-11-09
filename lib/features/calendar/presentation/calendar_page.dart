@@ -21,6 +21,8 @@ import '../../events/presentation/event_editor_sheet.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../../tasks/data/tasks_controller.dart';
 import '../data/calendar_controller.dart';
+import '../../settings/data/settings_controller.dart';
+import '../../settings/domain/app_settings.dart';
 
 /// کلیدهای تست تقویم.
 const Key calendarPreviousKey = Key('calendarPrevious');
@@ -575,7 +577,7 @@ class _SummaryEventRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final JalaliDateService dates = ref.watch(jalaliDateServiceProvider);
+    final AppSettings settings = ref.watch(currentSettingsProvider);
     final TextTheme text = Theme.of(context).textTheme;
     final Color accent = responsibility?.color ?? AppColors.textSecondary;
 
@@ -592,7 +594,7 @@ class _SummaryEventRow extends ConsumerWidget {
             SizedBox(
               width: 52,
               child: Text(
-                event.allDay ? 'تمام‌روز' : dates.formatTime(event.startLocal),
+                event.allDay ? 'تمام‌روز' : settings.formatTime(event.startLocal),
                 style: text.bodySmall?.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -754,6 +756,7 @@ class _WeekDayCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final JalaliDateService dates = ref.watch(jalaliDateServiceProvider);
+    final AppSettings settings = ref.watch(currentSettingsProvider);
     final TextTheme text = Theme.of(context).textTheme;
     final List<Event> events = activity.events;
     const int visibleLimit = 4;
@@ -807,7 +810,7 @@ class _WeekDayCard extends ConsumerWidget {
                       child: Text(
                         event.allDay
                             ? 'تمام‌روز'
-                            : dates.formatTime(event.startLocal),
+                            : settings.formatTime(event.startLocal),
                         style: text.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
                         ),

@@ -14,6 +14,10 @@ import '../../../shared/enums/app_enums.dart';
 import '../../../database/responsibility_repository_impl.dart';
 import '../../recurrence/domain/recurrence_rule.dart';
 import '../../recurrence/presentation/recurrence_scope_dialog.dart';
+import '../../reminders/data/reminder_sync_service.dart';
+import '../../reminders/data/reminders_controller.dart';
+import '../../reminders/domain/reminder.dart';
+import '../../settings/data/settings_controller.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
 import '../data/events_controller.dart';
 
@@ -28,6 +32,7 @@ const Key eventEditorEndKey = Key('eventEditorEnd');
 const Key eventEditorRecurrenceKey = Key('eventEditorRecurrence');
 const Key eventEditorIntervalKey = Key('eventEditorInterval');
 const Key eventEditorUntilKey = Key('eventEditorUntil');
+const Key eventEditorReminderKey = Key('eventEditorReminder');
 
 /// تبدیل ارقام فارسی/عربی به لاتین تا ورودی کاربر قابل تجزیه باشد.
 String _toLatinDigits(String input) {
@@ -154,6 +159,9 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
   late bool _allDay;
   String? _responsibilityId;
   RecurrenceFrequency? _frequency;
+
+  /// فاصله‌ی یادآوری (دقیقه)؛ `null` یعنی بدون یادآوری.
+  int? _reminderMinutes;
   bool _isSaving = false;
   String? _errorText;
 
@@ -178,8 +186,11 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
     final int startMinutes = existing == null || existing.allDay
         ? (widget.initialStartMinutes ?? (10 * 60))
         : (existing.startLocal.hour * 60) + existing.startLocal.minute;
+    final int defaultDuration = ref
+        .read(currentSettingsProvider)
+        .defaultEventDurationMinutes;
     int endMinutes = existing == null || existing.allDay
-        ? (widget.initialEndMinutes ?? startMinutes + 60)
+        ? (widget.initialEndMinutes ?? startMinutes + defaultDuration)
         : (existing.endLocal.hour * 60) + existing.endLocal.minute;
     if (endMinutes <= startMinutes) {
       endMinutes = startMinutes + 60;
@@ -192,6 +203,21 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
     _intervalController = TextEditingController(text: '۱');
     _untilController = TextEditingController();
     _responsibilityId = existing?.responsibilityId;
+
+    if (existing == null) {
+      _reminderMinutes = ref.read(currentSettingsProvider).defaultReminderMinutes;
+    } else {
+      // یادآوری نمونه/سری روی ردیف master نشسته است.
+      ref
+          .read(reminderRepositoryProvider)
+          .forEvent(existing.masterId)
+          .then((Reminder? reminder) {
+            if (!mounted) {
+              return;
+            }
+            setState(() => _reminderMinutes = reminder?.minutesBefore);
+          });
+    }
   }
 
   @override
@@ -363,8 +389,9 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
       final String description = _descriptionController.text.trim();
       final String location = _locationController.text.trim();
 
+      Event? saved;
       if (widget.existing == null) {
-        await controller.create(
+        saved = await controller.create(
           responsibilityId: responsibilityId,
           title: title,
           startAt: startAt,
@@ -388,6 +415,9 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
           description: description,
           location: location,
         );
+        saved = await ref
+            .read(eventRepositoryProvider)
+            .getEventById(widget.existing!.id);
       } else {
         await controller.updateEvent(
           id: widget.existing!.id,
@@ -399,6 +429,23 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
           description: description,
           location: location,
         );
+        saved = await ref
+            .read(eventRepositoryProvider)
+            .getEventById(widget.existing!.id);
+      }
+
+      if (saved != null) {
+        // خطای اعلان نباید ذخیره‌ی موفق رویداد را ناموفق نشان دهد.
+        try {
+          await ref
+              .read(reminderActionsProvider)
+              .setEventReminder(
+                event: saved,
+                minutesBefore: _reminderMinutes,
+              );
+        } catch (_) {
+          // زمان‌بندی اعلان در بازسازی بعدی دوباره تلاش می‌شود.
+        }
       }
 
       if (!mounted) {
@@ -589,6 +636,30 @@ class _EventEditorSheetState extends ConsumerState<EventEditorSheet> {
             'می‌کنید تغییر روی کدام بخش اعمال شود.',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
+        const SizedBox(height: AppSpacing.md),
+        DropdownButtonFormField<int?>(
+          key: eventEditorReminderKey,
+          initialValue: _reminderMinutes,
+          decoration: const InputDecoration(labelText: 'یادآوری'),
+          items: <DropdownMenuItem<int?>>[
+            const DropdownMenuItem<int?>(value: null, child: Text('بدون یادآوری')),
+            for (final ReminderOffset option in ReminderOffset.options)
+              DropdownMenuItem<int?>(value: option.minutes, child: Text(option.label)),
+          ],
+          onChanged: (int? value) => setState(() => _reminderMinutes = value),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.xs),
+          child: Text(
+            widget.existing?.isOccurrence ?? false
+                ? 'یادآوری برای کل سری تنظیم می‌شود.'
+                : 'اعلان محلی پیش از شروع رویداد نمایش داده می‌شود.',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ),
         const SizedBox(height: AppSpacing.md),
         AppTextField(
           controller: _locationController,

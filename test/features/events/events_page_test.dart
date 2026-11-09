@@ -191,6 +191,28 @@ void main() {
     expect(find.text('برای این روز رویدادی ثبت نشده'), findsOneWidget);
   });
 
+  testWidgets('یادآوری انتخابی ذخیره و در جزئیات نمایش داده می‌شود', (
+    WidgetTester tester,
+  ) async {
+    await openEventsPage(tester);
+
+    await tester.tap(find.text('رویداد جدید'));
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldOf(eventEditorTitleKey), 'کلاس با یادآوری');
+    await tester.tap(find.byKey(eventEditorReminderKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('۱۵ دقیقه قبل').last);
+    await tester.pumpAndSettle();
+    await saveSheet(tester);
+    expectSheetClosed();
+
+    await tester.tap(find.text('کلاس با یادآوری'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('یادآوری'), findsOneWidget);
+    expect(find.text('۱۵ دقیقه قبل'), findsOneWidget);
+  });
+
   testWidgets('جابه‌جایی روز رویدادها را جدا می‌کند', (
     WidgetTester tester,
   ) async {

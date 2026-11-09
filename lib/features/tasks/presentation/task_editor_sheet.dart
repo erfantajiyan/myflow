@@ -15,7 +15,11 @@ import '../../../shared/enums/app_enums.dart';
 import '../../events/presentation/event_editor_sheet.dart'
     show parseJalaliDateInput;
 import '../../projects/data/projects_controller.dart';
+import '../../reminders/data/reminder_sync_service.dart';
+import '../../reminders/data/reminders_controller.dart';
+import '../../reminders/domain/reminder.dart';
 import '../../responsibilities/data/responsibilities_controller.dart';
+import '../../settings/data/settings_controller.dart';
 import '../data/tasks_controller.dart';
 
 const Key taskEditorFormKey = Key('task-editor-form');
@@ -23,6 +27,7 @@ const Key taskEditorTitleKey = Key('task-editor-title');
 const Key taskEditorDateKey = Key('task-editor-date');
 const Key taskEditorTimeKey = Key('task-editor-time');
 const Key taskEditorEstimateKey = Key('task-editor-estimate');
+const Key taskEditorReminderKey = Key('task-editor-reminder');
 
 enum TaskEditorResult { created, updated }
 
@@ -50,6 +55,9 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
   String? _projectId;
   Priority _priority = Priority.medium;
   DateTime? _dueDate;
+
+  /// فاصله‌ی یادآوری (دقیقه)؛ `null` یعنی بدون یادآوری.
+  int? _reminderMinutes;
   String? _errorText;
   bool _isSaving = false;
 
@@ -79,6 +87,22 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
     _projectId = existing?.projectId;
     _priority = existing?.priority ?? Priority.medium;
     _dueDate = existing?.dueDateLocal;
+
+    if (existing == null) {
+      _reminderMinutes = ref
+          .read(currentSettingsProvider)
+          .defaultReminderMinutes;
+    } else {
+      ref
+          .read(reminderRepositoryProvider)
+          .forTask(existing.id)
+          .then((Reminder? reminder) {
+            if (!mounted) {
+              return;
+            }
+            setState(() => _reminderMinutes = reminder?.minutesBefore);
+          });
+    }
   }
 
   @override
@@ -195,8 +219,9 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
     );
 
     try {
+      Task? saved;
       if (widget.existing == null) {
-        await controller.create(
+        saved = await controller.create(
           responsibilityId: responsibilityId,
           title: title,
           projectId: _projectId,
@@ -219,6 +244,22 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
           clearDueDate: date == null,
           clearDueTime: time == null,
         );
+        saved = await ref
+            .read(taskRepositoryProvider)
+            .getTaskById(widget.existing!.id);
+      }
+
+      if (saved != null) {
+        try {
+          await ref
+              .read(reminderActionsProvider)
+              .setTaskReminder(
+                task: saved,
+                minutesBefore: _reminderMinutes,
+              );
+        } catch (_) {
+          // ذخیره‌ی وظیفه موفق است؛ اعلان در بازسازی بعدی دوباره تلاش می‌شود.
+        }
       }
 
       if (!mounted) {
@@ -336,6 +377,36 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          DropdownButtonFormField<int?>(
+            key: taskEditorReminderKey,
+            initialValue: _reminderMinutes,
+            decoration: const InputDecoration(labelText: 'یادآوری'),
+            items: <DropdownMenuItem<int?>>[
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('بدون یادآوری'),
+              ),
+              for (final ReminderOffset option in ReminderOffset.options)
+                DropdownMenuItem<int?>(
+                  value: option.minutes,
+                  child: Text(option.label),
+                ),
+            ],
+            onChanged: (int? value) =>
+                setState(() => _reminderMinutes = value),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xxs),
+            child: Text(
+              'برای یادآوری، تاریخ سررسید لازم است؛ بدون ساعت، ساعت ۹ صبح '
+              'همان روز در نظر گرفته می‌شود.',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
           ),
           const SizedBox(height: AppSpacing.sm),
           TextFormField(

@@ -91,7 +91,7 @@ void main() {
 
     await tester.tap(navLabel('گزارش‌ها'));
     await tester.pumpAndSettle();
-    expect(find.text('گزارشی برای نمایش نیست'), findsOneWidget);
+    expect(find.text('داده‌ای برای این ماه نیست'), findsOneWidget);
 
     await tester.tap(navLabel('خانه'));
     await tester.pumpAndSettle();
@@ -105,9 +105,19 @@ void main() {
     await tester.tap(find.byTooltip('تنظیمات'));
     await tester.pumpAndSettle();
 
+    expect(find.text('قالب ساعت'), findsOneWidget);
+    expect(find.text('یادآوری‌ها فعال باشند'), findsOneWidget);
+
+    // صفحه‌ی تنظیمات بلند است؛ بخش تقویم با اسکرول دیده می‌شود.
+    await tester.dragUntilVisible(
+      find.text('شروع هفته'),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text('شروع هفته'), findsOneWidget);
     expect(find.text('شنبه'), findsOneWidget);
-    expect(find.text('قالب ساعت'), findsOneWidget);
   });
 
   testWidgets('افزودن سریع، BottomSheet و رفتن به وظایف را نشان می‌دهد', (

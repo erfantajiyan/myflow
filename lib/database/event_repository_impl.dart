@@ -704,13 +704,19 @@ class DriftEventRepository implements EventRepository {
     if (existing == null) {
       throw EventNotFoundException(id);
     }
-    await (_db.update(_db.events)..where((t) => t.id.equals(id)))
-        .write(
-      EventsCompanion(
-        deletedAt: Value<DateTime>(DateTime.now().toUtc()),
-        updatedAt: Value<DateTime>(DateTime.now().toUtc()),
-      ),
-    );
+    await _db.transaction(() async {
+      await (_db.update(_db.events)..where((t) => t.id.equals(id)))
+          .write(
+        EventsCompanion(
+          deletedAt: Value<DateTime>(DateTime.now().toUtc()),
+          updatedAt: Value<DateTime>(DateTime.now().toUtc()),
+        ),
+      );
+      // یادآوری والدِ حذف‌شده باید در همان تراکنش پاک شود تا اعلان معلق
+      // باقی نماند (بخش ۱۰.۸ و فاز ۱۰ سند).
+      await (_db.delete(_db.reminders)..where((t) => t.eventId.equals(id)))
+          .go();
+    });
   }
 
   @override
@@ -1203,6 +1209,18 @@ class DriftEventRepository implements EventRepository {
           ))
           .write(
         EventsCompanion(recurrenceRuleId: Value<String?>(newRuleId)),
+      );
+
+      // یادآوری سری هم به master جدید منتقل می‌شود، وگرنه نیمه‌ی دوم سری
+      // بی‌یادآوری می‌ماند (بخش ۱۱.۹).
+      await (_db.update(_db.reminders)..where(
+            (t) => t.eventId.equals(master.id),
+          ))
+          .write(
+        RemindersCompanion(
+          eventId: Value<String?>(newMasterId),
+          notificationId: const Value<int?>(null),
+        ),
       );
     });
   }
