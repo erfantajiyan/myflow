@@ -15,6 +15,17 @@ val newBuildDir: Directory =
         .get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
+// پلاگین‌های Flutter نسخه‌ی AGP خودشان را در buildscript خود می‌خواهند؛
+// چون dl.google.com در این شبکه در دسترس نیست، آینه را به buildscript همه‌ی
+// زیرپروژه‌ها هم اضافه می‌کنیم (پیش از ارزیابی اسکریپت آن‌ها).
+subprojects {
+    buildscript {
+        repositories {
+            maven("https://maven.aliyun.com/repository/google")
+        }
+    }
+}
+
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
